@@ -1,0 +1,280 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>URL Shortener</title>
+<style>
+body {
+    font-family: Arial, sans-serif;
+    background: #f4f6f9;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    margin: 0;
+}
+
+/* Error styles */
+.error {
+    color: red;
+    font-size: 13px;
+    text-align: left;
+    margin-bottom: 5px;
+}
+
+.input-error {
+    border: 1px solid red;
+}
+
+/* Container */
+.container {
+    background: white;
+    padding: 30px;
+    border-radius: 12px;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+    width: 400px;
+    text-align: center;
+}
+
+/* Heading */
+h2 {
+    margin-bottom: 20px;
+}
+
+/* Inputs */
+input {
+    width: 100%;
+    padding: 12px;
+    margin: 8px 0;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    font-size: 14px;
+}
+
+/* Buttons */
+button {
+    width: 100%;
+    padding: 12px;
+    background: #2563eb;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 16px;
+    cursor: pointer;
+    margin-top: 10px;
+    transition: all 0.2s ease;
+}
+
+button:hover:not(:disabled) {
+    background: #1e40af;
+}
+
+button:active:not(:disabled) {
+    transform: scale(0.96);
+}
+
+button:disabled {
+    background: #9ca3af;
+    cursor: not-allowed;
+}
+
+/* Result */
+#result {
+    margin-top: 20px;
+    word-wrap: break-word;
+}
+
+/* Timer */
+#timer {
+    color: red;
+    margin-top: 10px;
+    font-weight: bold;
+}
+
+/* Links */
+a {
+    color: #2563eb;
+    font-weight: bold;
+}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+    <h2>🔗 URL Shortener</h2>
+<input type="text" id="url" placeholder="Enter long URL..." /> <input type="text" id="custom" placeholder="Custom alias (optional)" /> <input type="number" id="expiry" placeholder="Expiry in minutes (optional)" min="1"/> <button id="shortenBtn" onclick="shorten()">Shorten URL</button> <div id="result"></div> <div id="timer"></div>
+</div>
+<script>
+let countdownInterval;
+
+async function shorten() {
+    const btn = document.getElementById("shortenBtn");
+    const result = document.getElementById("result");
+    const timer = document.getElementById("timer");
+
+    let url = document.getElementById("url").value.trim();
+    const custom = document.getElementById("custom").value.trim();
+    const expiry = document.getElementById("expiry").value;
+
+        // VALIDATION
+    
+
+    if (!url) {
+        result.innerHTML = "<p style='color:red'>Please enter a URL</p>";
+        return;
+    }
+
+    // 🔥 Auto add https
+    if (!/^https?:\/\//i.test(url)) {
+        url = "https://" + url;
+    }
+
+    // ❌ INVALID FORMAT
+    try {
+        new URL(url);
+    } catch {
+        result.innerHTML = "<p style='color:red'>Enter a valid URL</p>";
+        return;
+    }
+
+    // LOADING STATE
+    btn.disabled = true;
+    btn.innerText = "Processing...";
+    result.innerHTML = "";
+    timer.innerHTML = "";
+
+    try {
+        const response = await fetch("/shorten", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                url: url,
+                custom_code: custom || null,
+                expiry_minutes: expiry ? parseInt(expiry) : null
+            })
+        });
+
+        const data = await response.json();
+
+        // ERROR
+        if (!response.ok) {
+            result.innerHTML = "<p style='color:red'>" + data.detail + "</p>";
+
+            if (response.status === 429) {
+                const retryAfter = response.headers.get("Retry-After") || 60;
+                startCountdown(parseInt(retryAfter));
+                return;
+            }
+
+            resetButton();
+            return;
+        }
+
+        // SUCCESS
+     result.innerHTML =
+    "<div style='margin-top:10px'>" +
+
+    "<a href='" + data.short_url + "' target='_blank'>" +
+    data.short_url +
+    "</a><br><br>" +
+
+    "<button onclick=\"copyLink('" + data.short_url + "', this)\">Copy</button> " +
+
+    "<button onclick=\"loadStats('" + data.short_url + "')\">View Stats</button>" +
+
+    "<div id='stats' style='margin-top:10px; text-align:left;'></div>" +
+
+    "</div>";
+
+        resetButton();
+
+    } catch (err) {
+        result.innerHTML = "<p style='color:red'>Something went wrong</p>";
+        resetButton();
+    }
+}
+
+function resetButton() {
+    const btn = document.getElementById("shortenBtn");
+    btn.disabled = false;
+    btn.innerText = "Shorten URL";
+}
+
+function startCountdown(seconds) {
+    const timer = document.getElementById("timer");
+
+    let remaining = seconds;
+
+    timer.innerHTML = "Try again in " + remaining + "s";
+
+    clearInterval(countdownInterval);
+
+    countdownInterval = setInterval(() => {
+        remaining--;
+
+        if (remaining <= 0) {
+            clearInterval(countdownInterval);
+            timer.innerHTML = "";
+            resetButton();
+        } else {
+            timer.innerHTML = "Try again in " + remaining + "s";
+        }
+    }, 1000);
+}
+function copyLink(link, btn) {
+    navigator.clipboard.writeText(link);
+
+    const originalText = btn.innerText;
+    btn.innerText = "Copied ✓";
+    btn.disabled = true;
+
+    setTimeout(() => {
+        btn.innerText = originalText;
+        btn.disabled = false;
+    }, 1500);
+}
+
+function formatDate(dateStr) {
+    if (!dateStr) return "-";
+    return new Date(dateStr).toLocaleString();
+}
+
+async function loadStats(shortUrl) {
+    const code = shortUrl.split("/").pop();
+    const statsDiv = document.getElementById("stats");
+
+    statsDiv.innerHTML = "Loading...";
+
+    try {
+        const res = await fetch("/stats/" + code);
+        const data = await res.json();
+
+        console.log("API DATA:", data);
+
+        if (!res.ok || !data) {
+            statsDiv.innerHTML = "<p style='color:red'>No stats found</p>";
+            return;
+        }
+
+        statsDiv.innerHTML = `
+            <div style="background:#f9fafb; padding:10px; border-radius:8px;">
+                <p><b>Clicks:</b> ${data.clicks ?? "-"}</p>
+                <p><b>Created:</b> ${data.created_at ?? "-"}</p>
+                <p><b>Expiry:</b> ${data.expiry ?? "None"}</p>
+                <p><b>Status:</b> ${
+                    data.is_expired ? "Expired ❌" : "Active ✅"
+                }</p>
+            </div>
+        `;
+    } catch (err) {
+        console.log("ERROR:", err);
+        statsDiv.innerHTML = "<p style='color:red'>Failed to load stats</p>";
+    }
+}
+</script>
+</body>
+</html>
